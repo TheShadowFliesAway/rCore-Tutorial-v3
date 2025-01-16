@@ -17,6 +17,7 @@ fn syscall(id: usize, args: [usize; 3]) -> isize {
     ret
 }
 
+// 进行了系统调用
 pub fn sys_write(fd: usize, buffer: &[u8]) -> isize {
     syscall(SYSCALL_WRITE, [fd, buffer.as_ptr() as usize, buffer.len()])
 }

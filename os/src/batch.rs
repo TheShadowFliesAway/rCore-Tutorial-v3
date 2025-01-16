@@ -12,11 +12,16 @@ const MAX_APP_NUM: usize = 16;
 const APP_BASE_ADDRESS: usize = 0x80400000;
 const APP_SIZE_LIMIT: usize = 0x20000;
 
+//内核的栈，这个属性的含义是
 #[repr(align(4096))]
 struct KernelStack {
     data: [u8; KERNEL_STACK_SIZE],
 }
 
+
+//用户区代码的栈
+//这里4096的含义是：这个类型的实例，也就是UserStack对象在存储的时候其首地址必须是4096的倍数
+//#[repr(align(N))] 用来 显式设置类型的对齐方式，其中 N 是一个对齐字节数，必须是 2 的幂，例如 1, 2, 4, 8, 16, 32, ..., 4096 等。
 #[repr(align(4096))]
 struct UserStack {
     data: [u8; USER_STACK_SIZE],
@@ -30,12 +35,14 @@ static USER_STACK: UserStack = UserStack {
 };
 
 impl KernelStack {
+    // 获取栈顶指针
     fn get_sp(&self) -> usize {
         self.data.as_ptr() as usize + KERNEL_STACK_SIZE
     }
     pub fn push_context(&self, cx: TrapContext) -> &'static mut TrapContext {
         let cx_ptr = (self.get_sp() - core::mem::size_of::<TrapContext>()) as *mut TrapContext;
         unsafe {
+            // 是个赋值操作，把传入的cx逐个字节的拷贝到上面的栈空间中
             *cx_ptr = cx;
         }
         unsafe { cx_ptr.as_mut().unwrap() }
@@ -73,15 +80,15 @@ impl AppManager {
             shutdown(false);
         }
         println!("[kernel] Loading app_{}", app_id);
-        // clear app area
+        // 把要运行区域的数据先清空
         core::slice::from_raw_parts_mut(APP_BASE_ADDRESS as *mut u8, APP_SIZE_LIMIT).fill(0);
 
         // 这些程序都被加载到了内存里面，现在需要搬运，从内存中的加载的位置搬运到程序运行的位置，也就是0x80400000，搬运到这里
 
         //1、标记出程序被加载到的位置
         let app_src = core::slice::from_raw_parts(
-            self.app_start[app_id] as *const u8,
-            self.app_start[app_id + 1] - self.app_start[app_id],
+            self.app_start[app_id] as *const u8, //起始位置
+            self.app_start[app_id + 1] - self.app_start[app_id],//长度
         );
         //2、标记出程序要执行需要被加载到的空间
         let app_dst = core::slice::from_raw_parts_mut(APP_BASE_ADDRESS as *mut u8, app_src.len());
@@ -150,22 +157,28 @@ pub fn print_app_info() {
 
 /// run next app
 pub fn run_next_app() -> ! {
+    // 获取全局变量的可变引用
     let mut app_manager = APP_MANAGER.exclusive_access();
     let current_app = app_manager.get_current_app();
+    // 加载当前的app,并不执行
     unsafe {
         app_manager.load_app(current_app);
     }
+    // 改变current_app的值，使其加1
     app_manager.move_to_next_app();
+    // 之后不再使用这个全局变量的可变引用，所以要进行删除
     drop(app_manager);
     // before this we have to drop local variables related to resources manually
     // and release the resources
     extern "C" {
+        // 引入这个函数
         fn __restore(cx_addr: usize);
     }
     unsafe {
+        // 内核初始化已经完成，从内核区返回到用户区准备执行用户代码
         __restore(KERNEL_STACK.push_context(TrapContext::app_init_context(
             APP_BASE_ADDRESS,
-            USER_STACK.get_sp(),
+            USER_STACK.get_sp(), //设置用户栈，编译时无需关心 sp 的值，栈操作代码由编译器生成。运行时操作系统设置 sp，决定用户程序的栈位置。
         )) as *const _ as usize);
     }
     panic!("Unreachable in batch::run_current_app!");

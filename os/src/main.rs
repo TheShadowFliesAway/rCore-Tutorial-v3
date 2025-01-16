@@ -84,7 +84,10 @@ pub fn rust_main() -> ! {
         boot_stack_top as usize, boot_stack_lower_bound as usize
     );
     error!("[kernel] .bss [{:#x}, {:#x})", sbss as usize, ebss as usize);
+    // 设置好了trap处理函数及流程
     trap::init();
+    // 输出一下几个app的信息
     batch::init();
+    // 调用 run_next_app 函数切换到下一个应用程序(初次运行切换到第一个程序)，记住当前CPU还是运行在S（特权级别），所以加载完了之后还要使特权级别下降，sret
     batch::run_next_app();
 }
